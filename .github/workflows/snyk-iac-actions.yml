@@ -1,17 +1,32 @@
-name: Snyk Infrastructure as Code and GitHub Security example
-on: push
+name: continuous-delivery
+on:
+  push:
+    branches:
+      - main
 jobs:
-  snyk:
+  delivery:
     runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
-    - uses: actions/checkout@v2
-    - name: Run Snyk to check Terraform configuration file for issues
-      continue-on-error: true
-      uses: snyk/actions/iac@master
-      env:
-        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      with:
-        file: .
-    - uses: github/codeql-action/upload-sarif@v1
-      with:
-        sarif_file: snyk.sarif
+      - uses: actions/checkout@v3
+      - uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+      - uses: snyk/actions/setup@master
+      - run: terraform init
+
+      - name: terraform plan
+        run: terraform plan -input=false
+
+      # Always report misconfigurations and continue with job
+      - name: snyk iac test
+        run: snyk iac test --org=${{ secrets.SNYK_ORG_ID }} --report || true
+
+      - name: terraform apply
+        run: terraform apply -auto-approve -input=false
+
+      - name: capture terraform state
+        run: terraform state pull | snyk iac capture --org=${{ secrets.SNYK_ORG_ID }} --stdin
